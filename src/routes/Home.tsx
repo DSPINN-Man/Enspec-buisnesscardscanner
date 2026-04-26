@@ -1,21 +1,22 @@
 // Home — single-screen scanner + recent scans, matching the Variant design.
 //
-// • The scanner card embeds a live camera preview (started on first user tap
-//   to satisfy iOS Safari's autoplay/permission rules).
-// • "Capture Output" snaps the current frame, crops to ID-1 aspect, persists
-//   to IndexedDB, calls /api/extract if online (or queues if not), then
-//   navigates to /review/:id.
-// • Recent Scans live below the card and update reactively from Dexie.
-// • Mode toggle flips between Business Card (Vision AI) and Conference Badge
-//   (BarcodeDetector watching the same video stream).
+// • Scanner card embeds a live camera preview (started on first user tap to
+//   satisfy iOS Safari's gesture rule for permission + autoplay).
+// • Capture flow is FAST-PATH: photo persists to IndexedDB → navigate to
+//   /review/:id immediately. Gemini extraction runs in the background and
+//   patches the row when it finishes; the Review screen reactively shows
+//   the image instantly and a shimmer skeleton until fields arrive.
+// • Recent Scans use SwipeableScanRow (← delete, → star).
+// • The arrow button next to "Capture Output" jumps to the /scans dashboard.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { dbx, insertContact, patchContact, type Contact } from '@/db';
+import { dbx, deleteContact, insertContact, patchContact, toggleStar } from '@/db';
 import { extractFromBlob } from '@/vision/extract';
 import { flushPending } from '@/sync/queue';
 import { ModeToggle, type Mode } from '@/components/ModeToggle';
+import { SwipeableScanRow } from '@/components/SwipeableScanRow';
 
 export default function Home() {
   const nav = useNavigate();
@@ -23,20 +24,27 @@ export default function Home() {
   const [cameraOn, setCameraOn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastBadgeRef = useRef<string | null>(null);
-  const recentRef = useRef<HTMLDivElement>(null);
 
   const rows = useLiveQuery(
-    () => dbx.contacts.orderBy('createdAt').reverse().limit(50).toArray(),
+    () => dbx.contacts.orderBy('createdAt').reverse().limit(8).toArray(),
     [],
     [],
   );
 
-  // Stop camera on unmount.
-  useEffect(() => () => stopCamera(), []);
+  useEffect(() => () => stopCamera(), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close any open swipe row when tapping outside the list
+  useEffect(() => {
+    if (!openSwipeId) return;
+    const close = () => setOpenSwipeId(null);
+    document.addEventListener('scroll', close, { passive: true });
+    return () => document.removeEventListener('scroll', close);
+  }, [openSwipeId]);
 
   const startCamera = useCallback(async () => {
     if (cameraOn || streamRef.current) return;
@@ -97,11 +105,7 @@ export default function Home() {
 
   const capture = useCallback(async () => {
     if (busy) return;
-    if (!cameraOn) {
-      // First tap turns the camera on — iOS gesture rule.
-      await startCamera();
-      return;
-    }
+    if (!cameraOn) { await startCamera(); return; }
     if (!videoRef.current || !canvasRef.current) return;
     setBusy(true);
     setErr(null);
@@ -110,52 +114,48 @@ export default function Home() {
       const vw = v.videoWidth, vh = v.videoHeight;
       if (!vw || !vh) throw new Error('Camera not ready — give it a moment.');
 
-      // Capture the FULL video frame (no center-crop) — Gemini needs the
-      // surroundings to locate the card, and we'll crop using its bbox.
+      // Capture FULL frame so Gemini can see the card boundaries.
       const c = canvasRef.current;
       c.width = vw;
       c.height = vh;
       c.getContext('2d')!.drawImage(v, 0, 0, vw, vh);
-
       const fullBlob = await new Promise<Blob>((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('blob failed'))), 'image/jpeg', 0.92),
       );
 
-      // Always persist the photo first — capture is never lost even if AI fails.
+      // Persist photo first, navigate IMMEDIATELY — extraction runs in BG.
       const row = await insertContact({
         mode: 'card',
         imageBlob: fullBlob,
         syncStatus: 'needs-extraction',
       });
-
-      // Try extraction inline if online. Errors surface to the user instead
-      // of being swallowed; the row is preserved either way.
-      if (navigator.onLine) {
-        try {
-          const r = await extractFromBlob(fullBlob);
-          // Replace the stored image with the tightly-cropped version Gemini
-          // outlined for us — falls back to the original if no bbox.
-          await patchContact(row.id, {
-            imageBlob: r.croppedBlob,
-            ...r.fields,
-            confidence: r.confidence,
-            rawText: r.rawText,
-            syncStatus: 'pending',
-            syncError: null,
-          });
-          flushPending().catch(() => {});
-        } catch (extractErr: any) {
-          const msg = String(extractErr?.message ?? extractErr);
-          console.error('[capture] extraction failed', extractErr);
-          await patchContact(row.id, {
-            syncError: msg,
-            syncStatus: 'needs-extraction',
-          });
-          setErr(`AI extraction failed — photo saved. ${msg}`);
-          // Still navigate so user sees the photo and can edit manually.
-        }
-      }
       nav(`/review/${row.id}`);
+
+      // Fire-and-forget — Review screen renders the image instantly and
+      // the form fields populate reactively as soon as we patch the row.
+      if (navigator.onLine) {
+        extractFromBlob(fullBlob)
+          .then(async (r) => {
+            await patchContact(row.id, {
+              imageBlob: r.croppedBlob,
+              ...r.fields,
+              confidence: r.confidence,
+              rawText: r.rawText,
+              syncStatus: 'pending',
+              syncError: null,
+              syncAttempts: 0,
+            });
+            flushPending().catch(() => {});
+          })
+          .catch(async (extractErr: any) => {
+            const msg = String(extractErr?.message ?? extractErr);
+            console.error('[capture] extraction failed', extractErr);
+            await patchContact(row.id, {
+              syncError: msg,
+              syncStatus: 'needs-extraction',
+            });
+          });
+      }
     } catch (e: any) {
       setErr(e?.message ?? 'Capture failed');
     } finally {
@@ -197,14 +197,11 @@ export default function Home() {
           {mode === 'card' ? 'Point Camera' : 'Scan Badge'}
         </h1>
 
-        {/* Preview area: dashed placeholder when off, live video when on */}
         <button
           onClick={startCamera}
           disabled={cameraOn}
           className={`relative block w-full rounded-xl2 overflow-hidden bg-black aspect-[4/3] disabled:cursor-default ${
-            cameraOn
-              ? 'border border-hairline'
-              : 'border-2 border-dashed border-hairline-2 bg-bg-2'
+            cameraOn ? 'border border-hairline' : 'border-2 border-dashed border-hairline-2 bg-bg-2'
           }`}
           aria-label={cameraOn ? 'Live camera preview' : 'Tap to start camera'}
         >
@@ -223,7 +220,6 @@ export default function Home() {
           <p className="mt-3 text-[11px] uppercase tracking-wider text-warn">Offline — will extract when online</p>
         )}
 
-        {/* Capture row */}
         <div className="mt-4 flex items-center gap-2.5">
           <button
             onClick={capture}
@@ -241,9 +237,9 @@ export default function Home() {
           <button
             onClick={() => {
               if (cameraOn) stopCamera();
-              else recentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              else nav('/scans');
             }}
-            aria-label={cameraOn ? 'Stop camera' : 'Jump to recent scans'}
+            aria-label={cameraOn ? 'Stop camera' : 'Open all scans dashboard'}
             className="w-12 h-12 rounded-2xl border border-hairline bg-card flex items-center justify-center text-ink hover:bg-bg-2 transition"
           >
             {cameraOn ? <CloseIcon /> : <ArrowIcon />}
@@ -252,9 +248,14 @@ export default function Home() {
       </section>
 
       {/* Recent scans */}
-      <div ref={recentRef} className="mt-7 mb-2 flex items-baseline justify-between">
+      <div className="mt-7 mb-2 flex items-baseline justify-between">
         <h2 className="text-[13px] text-ink-2 font-medium">Recent Scans</h2>
-        <span className="text-[12px] text-ink-3">{currentDateLabel()}</span>
+        <button
+          onClick={() => nav('/scans')}
+          className="text-[12px] text-accent font-semibold hover:underline"
+        >
+          See all →
+        </button>
       </div>
 
       {rows && rows.length === 0 ? (
@@ -262,7 +263,18 @@ export default function Home() {
           <p className="text-ink-2 text-sm">No scans yet — tap above to capture your first card.</p>
         </div>
       ) : (
-        <ul className="space-y-2">{rows?.map((r) => <ScanRow key={r.id} r={r} />)}</ul>
+        <ul className="space-y-2">
+          {rows?.map((r) => (
+            <SwipeableScanRow
+              key={r.id}
+              r={r}
+              onDelete={(id) => deleteContact(id)}
+              onStar={(id) => toggleStar(id)}
+              openId={openSwipeId}
+              setOpenId={setOpenSwipeId}
+            />
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -270,44 +282,14 @@ export default function Home() {
 
 // ---------------------------------------------------------------------------
 
-function ScanRow({ r }: { r: Contact }) {
-  const nav = useNavigate();
-  const initials = computeInitials(r);
-  const av = avatarTone(initials);
-  return (
-    <li>
-      <button
-        onClick={() => nav(`/review/${r.id}`)}
-        className="w-full text-left card px-4 py-3 flex items-center gap-3.5 active:scale-[0.995] transition"
-      >
-        <span
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-[13px] shrink-0"
-          style={{ backgroundColor: av }}
-        >
-          {initials}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-ink font-semibold truncate">{r.name || 'Untitled'}</p>
-          <p className="text-ink-2 text-[13px] truncate">
-            {[r.title, r.company].filter(Boolean).join(', ') ||
-              (r.mode === 'badge' ? 'Conference Badge' : r.email || r.phone || '—')}
-          </p>
-        </div>
-        <span className="text-ink-3 text-[12px] shrink-0">{relativeTime(r.createdAt)}</span>
-      </button>
-    </li>
-  );
-}
-
 function PlaceholderDots() {
-  // Decorative cluster of soft circles centered in the dashed box.
   const dots = [
-    { x: '38%',  y: '40%', c: '#D7CCEF' },
-    { x: '50%',  y: '40%', c: '#C7C2BB' },
-    { x: '62%',  y: '40%', c: '#C7C2BB' },
-    { x: '38%',  y: '60%', c: '#C7C2BB' },
-    { x: '50%',  y: '60%', c: '#D7CCEF' },
-    { x: '62%',  y: '60%', c: '#C7C2BB' },
+    { x: '38%', y: '40%', c: '#D7CCEF' },
+    { x: '50%', y: '40%', c: '#C7C2BB' },
+    { x: '62%', y: '40%', c: '#C7C2BB' },
+    { x: '38%', y: '60%', c: '#C7C2BB' },
+    { x: '50%', y: '60%', c: '#D7CCEF' },
+    { x: '62%', y: '60%', c: '#C7C2BB' },
   ];
   return (
     <div className="absolute inset-0">
@@ -363,36 +345,6 @@ function Spinner() {
       <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
-}
-
-// ---- helpers --------------------------------------------------------------
-
-function computeInitials(r: Contact): string {
-  const src = r.name || r.company || r.email || '??';
-  const parts = src.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return src.slice(0, 2).toUpperCase();
-}
-
-const TONES = ['#F4A261', '#7AA1E1', '#52B6A4', '#E07A8B', '#B19CE0', '#9AA0A6'];
-function avatarTone(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  return TONES[Math.abs(h) % TONES.length];
-}
-
-function relativeTime(ts: number): string {
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 5)    return 'Just now';
-  if (s < 60)   return `${s}s ago`;
-  const m = Math.round(s / 60); if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60); if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24); if (d < 7)  return `${d}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function currentDateLabel(): string {
-  return new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function parseBadge(data: string) {

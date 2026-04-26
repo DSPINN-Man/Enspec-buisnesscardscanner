@@ -40,8 +40,16 @@ export default {
       },
       keyframes: {
         pulseRing: { '0%,100%': { opacity: '0.6' }, '50%': { opacity: '1' } },
+        shimmer:   { '0%':       { backgroundPosition: '200% 0' },
+                     '100%':     { backgroundPosition: '-200% 0' } },
+        fadeUp:    { '0%':       { opacity: '0', transform: 'translateY(6px)' },
+                     '100%':     { opacity: '1', transform: 'translateY(0)' } },
       },
-      animation: { pulseRing: 'pulseRing 2s ease-in-out infinite' },
+      animation: {
+        pulseRing: 'pulseRing 2s ease-in-out infinite',
+        shimmer:   'shimmer 1.5s linear infinite',
+        fadeUp:    'fadeUp 200ms ease-out both',
+      },
     },
   },
   plugins: [],

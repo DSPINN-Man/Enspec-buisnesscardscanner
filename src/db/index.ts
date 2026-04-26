@@ -13,13 +13,14 @@ export interface Contact {
   website: string | null;
   notes: string | null;
   mode: ScanMode;
-  imageBlob: Blob | null;     // JPEG of flattened card, stored locally only
+  imageBlob: Blob | null;
   confidence: Record<string, number> | null;
   rawText: string | null;
   syncStatus: SyncStatus;
   syncAttempts: number;
   syncError: string | null;
   nextAttemptAt: number;
+  starred: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -28,9 +29,16 @@ class ScannerDB extends Dexie {
   contacts!: EntityTable<Contact, 'id'>;
   constructor() {
     super('sota-scanner');
+    // v1 — original schema
     this.version(1).stores({
       contacts: 'id, syncStatus, createdAt, nextAttemptAt',
     });
+    // v2 — added `starred` field with index for the dashboard's filter chips
+    this.version(2).stores({
+      contacts: 'id, syncStatus, createdAt, nextAttemptAt, starred',
+    }).upgrade((tx) =>
+      tx.table('contacts').toCollection().modify((c) => { c.starred = false; }),
+    );
   }
 }
 
@@ -60,6 +68,7 @@ export async function insertContact(
     syncAttempts: 0,
     syncError: null,
     nextAttemptAt: now,
+    starred: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -69,6 +78,16 @@ export async function insertContact(
 
 export async function patchContact(id: string, patch: Partial<Contact>): Promise<void> {
   await dbx.contacts.update(id, { ...patch, updatedAt: Date.now() });
+}
+
+export async function deleteContact(id: string): Promise<void> {
+  await dbx.contacts.delete(id);
+}
+
+export async function toggleStar(id: string): Promise<void> {
+  const row = await dbx.contacts.get(id);
+  if (!row) return;
+  await dbx.contacts.update(id, { starred: !row.starred, updatedAt: Date.now() });
 }
 
 export async function dueForSync(now: number, limit = 25): Promise<Contact[]> {
