@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --safe-top:    env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #0B0F1A;
+  color: #F8FAFC;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  font-family: -apple-system, BlinkMacSystemFont, Inter, 'Segoe UI', sans-serif;
+}
+
+@layer components {
+  .glass {
+    @apply bg-surface border border-hairline rounded-2xl backdrop-blur-xl;
+  }
+  .glass-strong {
+    @apply bg-surface-2 border border-hairline-2 rounded-2xl backdrop-blur-2xl;
+  }
+  .hairline { border-color: rgba(255,255,255,0.12); }
+}
+
+input, textarea { font: inherit; }
+button { -webkit-appearance: none; }

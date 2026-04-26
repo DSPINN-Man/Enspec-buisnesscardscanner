@@ -1,0 +1,8 @@
+name = "card-scanner-proxy"
+main = "gemini-proxy.ts"
+compatibility_date = "2026-04-01"
+
+# Secrets (set via `wrangler secret put ...`):
+#   GEMINI_API_KEY        - https://aistudio.google.com/app/apikey
+#   EMAIL_WEBHOOK_URL     - your SendGrid / Postmark / Make.com webhook
+#   ALLOWED_ORIGIN        - https://cards.enspec.com  (vars, not secret)
