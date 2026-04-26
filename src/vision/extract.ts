@@ -36,8 +36,11 @@ export async function extractFromBlob(blob: Blob): Promise<ExtractResult> {
   const res = await fetch(EXTRACT_ENDPOINT, { method: 'POST', body: form });
   if (!res.ok) throw new Error(`extract failed: ${res.status}`);
 
-  const json = await res.json();
+  const json = (await res.json()) as {
+    fields: unknown;
+    confidence: Record<keyof Extracted, number>;
+    rawText?: string;
+  };
   const fields = ExtractedSchema.parse(json.fields);
-  const confidence = json.confidence as Record<keyof Extracted, number>;
-  return { fields, confidence, rawText: json.rawText ?? '' };
+  return { fields, confidence: json.confidence, rawText: json.rawText ?? '' };
 }
