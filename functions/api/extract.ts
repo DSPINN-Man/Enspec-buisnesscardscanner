@@ -8,8 +8,12 @@ interface Env {
   GEMINI_API_KEY: string;
 }
 
+// Model: gemini-2.5-flash is the current free-tier vision model available
+// to new API keys. (gemini-2.0-flash was deprecated for new users.)
+// Use the alias `gemini-flash-latest` if you'd rather track Google's
+// current default automatically.
 const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 const SYSTEM_PROMPT = `You are a precise business-card / conference-badge extractor.
 Return a strict JSON object matching this shape — no prose, no markdown fences:
