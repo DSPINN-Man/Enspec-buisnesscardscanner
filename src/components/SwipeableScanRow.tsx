@@ -1,13 +1,15 @@
 // Swipe-to-action row for scans. Vanilla pointer events — no lib.
 //
-//   ← swipe left  → reveals red Delete  (snap-open + tap, or fast swipe past
-//                                        threshold = instant delete)
-//   → swipe right → reveals amber Star  (toggles starred)
+//   ← swipe left  → reveals red Delete  (tap the revealed button OR fling
+//                                        past FLING threshold for instant)
+//   → swipe right → reveals amber Star  (tap to toggle, OR fling)
 //
-// • Vertical drags are NOT captured — page scroll keeps working (touch-action).
-// • Once open, tapping the row body closes it instead of navigating.
-// • Tapping outside an open row anywhere on the page closes it (handled by the
-//   parent list with a single document listener).
+// Behaviour:
+// • Action panels are real <button>s — tapping the revealed colour fires
+//   the action immediately (this was the bug — they used to be divs).
+// • Vertical drags are NOT captured — page scroll keeps working
+//   (touch-action: pan-y).
+// • Tapping the row body when open → closes it instead of navigating.
 // • Mouse / trackpad work too via pointer events, so desktop is identical.
 
 import { useNavigate } from 'react-router-dom';
@@ -15,8 +17,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Contact } from '@/db';
 
 const REVEAL = 96;        // px each side reveals when fully open
-const THRESHOLD = 56;     // distance to count as a swipe-open
-const FLING = 220;        // px past threshold = instant fire
+const THRESHOLD = 48;     // distance to count as a swipe-open
+const FLING = 140;        // distance past which we fire instantly
 const DIR_LOCK = 8;       // px of horizontal motion before we capture
 
 export function SwipeableScanRow({
@@ -40,7 +42,7 @@ export function SwipeableScanRow({
 
   const isOpen = openId === r.id;
 
-  // External close: close when another row opens, or parent closes all.
+  // External close: snap shut when another row opens, or parent clears.
   useEffect(() => {
     if (!isOpen && tx !== 0 && !dragging) setTx(0);
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -72,12 +74,23 @@ export function SwipeableScanRow({
     setDragging(false);
     ref.current?.releasePointerCapture?.(e.pointerId);
     const final = tx;
-    if (final < -FLING) { onDelete(r.id); setOpenId(null); return; }
-    if (final >  FLING) { onStar(r.id);   setTx(0); setOpenId(null); return; }
+    if (final < -FLING) { fire('delete'); return; }
+    if (final >  FLING) { fire('star');   return; }
     if (final < -THRESHOLD) { setTx(-REVEAL); setOpenId(r.id); return; }
     if (final >  THRESHOLD) { setTx( REVEAL); setOpenId(r.id); return; }
     setTx(0);
     if (isOpen) setOpenId(null);
+  };
+
+  const fire = (action: 'delete' | 'star') => {
+    if (action === 'delete') {
+      onDelete(r.id);          // row will disappear from list — no need to reset tx
+      setOpenId(null);
+    } else {
+      onStar(r.id);
+      setTx(0);
+      setOpenId(null);
+    }
   };
 
   const onClickRow = (e: React.MouseEvent) => {
@@ -91,15 +104,25 @@ export function SwipeableScanRow({
 
   return (
     <li className="relative overflow-hidden rounded-2xl">
-      {/* Action panels behind the row */}
-      <div className="absolute inset-y-0 left-0 w-24 flex items-center justify-center bg-amber-400 text-white">
+      {/* Action panels behind the row — REAL buttons so tapping the revealed
+          colour fires the action. They sit underneath; the row slides off
+          to expose them. */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); fire('star'); }}
+        aria-label={r.starred ? 'Unstar' : 'Star'}
+        className="absolute inset-y-0 left-0 w-24 flex items-center justify-center bg-amber-400 text-white active:bg-amber-500 transition-colors"
+      >
         <StarIcon filled={r.starred} />
-        <span className="sr-only">Star</span>
-      </div>
-      <div className="absolute inset-y-0 right-0 w-24 flex items-center justify-center bg-red-500 text-white">
+      </button>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); fire('delete'); }}
+        aria-label="Delete"
+        className="absolute inset-y-0 right-0 w-24 flex items-center justify-center bg-red-500 text-white active:bg-red-600 transition-colors"
+      >
         <TrashIcon />
-        <span className="sr-only">Delete</span>
-      </div>
+      </button>
 
       <div
         ref={ref}
@@ -113,7 +136,7 @@ export function SwipeableScanRow({
           transition: dragging ? 'none' : 'transform 220ms cubic-bezier(.2,.9,.3,1)',
           touchAction: 'pan-y',
         }}
-        className="relative bg-card border border-hairline rounded-2xl shadow-card px-4 py-3 flex items-center gap-3.5 select-none cursor-pointer"
+        className="relative bg-card border border-hairline rounded-2xl shadow-card px-4 py-3 flex items-center gap-3.5 select-none cursor-pointer z-10"
       >
         <span
           className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-[13px] shrink-0 relative"
@@ -154,7 +177,7 @@ function TrashIcon() {
   );
 }
 
-// Shared helpers (also used by Home + Scans pages — exporting for reuse)
+// Shared helpers — also used by Home + Scans.
 export function computeInitials(r: Contact): string {
   const src = r.name || r.company || r.email || '??';
   const parts = src.trim().split(/\s+/);
