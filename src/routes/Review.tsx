@@ -12,18 +12,19 @@ export default function Review() {
 
   useEffect(() => {
     if (!id) return;
+    let url: string | null = null;
     dbx.contacts.get(id).then((r) => {
       if (!r) return;
       setRow(r);
       if (r.imageBlob) {
-        const url = URL.createObjectURL(r.imageBlob);
+        url = URL.createObjectURL(r.imageBlob);
         setImageUrl(url);
-        return () => URL.revokeObjectURL(url);
       }
     });
+    return () => { if (url) URL.revokeObjectURL(url); };
   }, [id]);
 
-  if (!row) return <div className="pt-[72px] px-4 text-ink-2">Loading…</div>;
+  if (!row) return <div className="shell pt-6 text-ink-2">Loading…</div>;
 
   const conf = row.confidence ?? {};
   const patch = async (field: keyof Contact, value: string) => {
@@ -36,38 +37,53 @@ export default function Review() {
   };
 
   return (
-    <div className="pt-[72px] pb-[160px] px-4">
+    <div className="shell pt-2 pb-32">
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={() => nav('/')} className="w-10 h-10 rounded-full border border-hairline bg-card flex items-center justify-center text-ink-2 hover:text-ink transition" aria-label="Back">
+          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </button>
+        <h1 className="font-display font-extrabold text-[26px] tracking-tight">Review</h1>
+      </div>
+
       {imageUrl && (
-        <div className="mb-4 rounded-xl2 overflow-hidden border hairline">
-          <img src={imageUrl} alt="captured card" className="w-full" />
+        <div className="card overflow-hidden mb-4">
+          <img src={imageUrl} alt="captured card" className="w-full block" />
         </div>
       )}
+
       {row.syncStatus === 'needs-extraction' && (
-        <div className="glass px-4 py-3 mb-4 border-warn/50">
-          <p className="text-warn text-sm">Awaiting AI extraction. Will run automatically when online.</p>
+        <div className="card border-warn/40 bg-warn/5 px-4 py-3 mb-4">
+          <p className="text-warn text-sm font-medium">Awaiting AI extraction.</p>
+          <p className="text-warn/80 text-xs mt-0.5">Will run automatically when online.</p>
         </div>
       )}
 
-      <ConfidenceField label="Name"    value={row.name}    confidence={conf.name    ?? 0} onChange={(v) => patch('name', v)} />
-      <ConfidenceField label="Title"   value={row.title}   confidence={conf.title   ?? 0} onChange={(v) => patch('title', v)} />
-      <ConfidenceField label="Company" value={row.company} confidence={conf.company ?? 0} onChange={(v) => patch('company', v)} />
-      <ConfidenceField label="Email"   value={row.email}   confidence={conf.email   ?? 0} onChange={(v) => patch('email', v)} type="email" />
-      <ConfidenceField label="Phone"   value={row.phone}   confidence={conf.phone   ?? 0} onChange={(v) => patch('phone', v)} type="tel" />
-      <ConfidenceField label="Website" value={row.website} confidence={conf.website ?? 0} onChange={(v) => patch('website', v)} type="url" />
-      <ConfidenceField label="Notes"   value={row.notes}   confidence={0} onChange={(v) => patch('notes', v)} multiline />
+      <div className="card p-4">
+        <ConfidenceField label="Name"    value={row.name}    confidence={conf.name    ?? 0} onChange={(v) => patch('name', v)} />
+        <ConfidenceField label="Title"   value={row.title}   confidence={conf.title   ?? 0} onChange={(v) => patch('title', v)} />
+        <ConfidenceField label="Company" value={row.company} confidence={conf.company ?? 0} onChange={(v) => patch('company', v)} />
+        <ConfidenceField label="Email"   value={row.email}   confidence={conf.email   ?? 0} onChange={(v) => patch('email', v)} type="email" />
+        <ConfidenceField label="Phone"   value={row.phone}   confidence={conf.phone   ?? 0} onChange={(v) => patch('phone', v)} type="tel" />
+        <ConfidenceField label="Website" value={row.website} confidence={conf.website ?? 0} onChange={(v) => patch('website', v)} type="url" />
+        <ConfidenceField label="Notes"   value={row.notes}   confidence={0} onChange={(v) => patch('notes', v)} multiline />
+      </div>
 
-      <button
-        onClick={async () => { await flushPending(); nav('/'); }}
-        className="w-full mt-2 py-3.5 rounded-2xl bg-accent text-white font-bold active:scale-[0.99] transition"
-      >
-        Save & sync
-      </button>
-      <button
-        onClick={() => nav('/')}
-        className="w-full mt-2 py-3 text-ink-2 font-semibold"
-      >
-        Done (sync later)
-      </button>
+      <div className="mt-3 space-y-2">
+        <button
+          onClick={async () => { await flushPending(); nav('/'); }}
+          className="w-full py-3.5 rounded-full bg-accent text-white font-semibold shadow-cta active:scale-[0.99] transition"
+        >
+          Save & sync
+        </button>
+        <button
+          onClick={() => nav('/')}
+          className="w-full py-3 text-ink-2 font-medium"
+        >
+          Done (sync later)
+        </button>
+      </div>
     </div>
   );
 }
