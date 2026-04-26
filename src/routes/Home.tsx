@@ -12,12 +12,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { dbx, insertContact, type Contact } from '@/db';
+import { dbx, insertContact, patchContact, type Contact } from '@/db';
 import { extractFromBlob } from '@/vision/extract';
 import { flushPending } from '@/sync/queue';
 import { ModeToggle, type Mode } from '@/components/ModeToggle';
-
-const CARD_ASPECT = 1.586;
 
 export default function Home() {
   const nav = useNavigate();
@@ -29,6 +27,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastBadgeRef = useRef<string | null>(null);
+  const recentRef = useRef<HTMLDivElement>(null);
 
   const rows = useLiveQuery(
     () => dbx.contacts.orderBy('createdAt').reverse().limit(50).toArray(),
@@ -111,37 +110,50 @@ export default function Home() {
       const vw = v.videoWidth, vh = v.videoHeight;
       if (!vw || !vh) throw new Error('Camera not ready — give it a moment.');
 
-      const cropW = vw;
-      const cropH = Math.round(cropW / CARD_ASPECT);
-      const originY = Math.max(0, Math.round((vh - cropH) / 2));
-
+      // Capture the FULL video frame (no center-crop) — Gemini needs the
+      // surroundings to locate the card, and we'll crop using its bbox.
       const c = canvasRef.current;
-      c.width = Math.min(2000, cropW);
-      c.height = Math.round(c.width / CARD_ASPECT);
-      c.getContext('2d')!.drawImage(v, 0, originY, cropW, cropH, 0, 0, c.width, c.height);
+      c.width = vw;
+      c.height = vh;
+      c.getContext('2d')!.drawImage(v, 0, 0, vw, vh);
 
-      const blob = await new Promise<Blob>((res, rej) =>
-        c.toBlob((b) => (b ? res(b) : rej(new Error('blob failed'))), 'image/jpeg', 0.9),
+      const fullBlob = await new Promise<Blob>((res, rej) =>
+        c.toBlob((b) => (b ? res(b) : rej(new Error('blob failed'))), 'image/jpeg', 0.92),
       );
 
-      let row;
+      // Always persist the photo first — capture is never lost even if AI fails.
+      const row = await insertContact({
+        mode: 'card',
+        imageBlob: fullBlob,
+        syncStatus: 'needs-extraction',
+      });
+
+      // Try extraction inline if online. Errors surface to the user instead
+      // of being swallowed; the row is preserved either way.
       if (navigator.onLine) {
         try {
-          const r = await extractFromBlob(blob);
-          row = await insertContact({
-            mode: 'card',
-            imageBlob: blob,
+          const r = await extractFromBlob(fullBlob);
+          // Replace the stored image with the tightly-cropped version Gemini
+          // outlined for us — falls back to the original if no bbox.
+          await patchContact(row.id, {
+            imageBlob: r.croppedBlob,
             ...r.fields,
             confidence: r.confidence,
             rawText: r.rawText,
             syncStatus: 'pending',
+            syncError: null,
           });
           flushPending().catch(() => {});
-        } catch {
-          row = await insertContact({ mode: 'card', imageBlob: blob, syncStatus: 'needs-extraction' });
+        } catch (extractErr: any) {
+          const msg = String(extractErr?.message ?? extractErr);
+          console.error('[capture] extraction failed', extractErr);
+          await patchContact(row.id, {
+            syncError: msg,
+            syncStatus: 'needs-extraction',
+          });
+          setErr(`AI extraction failed — photo saved. ${msg}`);
+          // Still navigate so user sees the photo and can edit manually.
         }
-      } else {
-        row = await insertContact({ mode: 'card', imageBlob: blob, syncStatus: 'needs-extraction' });
       }
       nav(`/review/${row.id}`);
     } catch (e: any) {
@@ -189,13 +201,17 @@ export default function Home() {
         <button
           onClick={startCamera}
           disabled={cameraOn}
-          className="relative block w-full rounded-xl2 overflow-hidden border-2 border-dashed border-hairline-2 bg-bg-2 aspect-[16/10] disabled:cursor-default"
+          className={`relative block w-full rounded-xl2 overflow-hidden bg-black aspect-[4/3] disabled:cursor-default ${
+            cameraOn
+              ? 'border border-hairline'
+              : 'border-2 border-dashed border-hairline-2 bg-bg-2'
+          }`}
           aria-label={cameraOn ? 'Live camera preview' : 'Tap to start camera'}
         >
           <video
             ref={videoRef}
             playsInline muted autoPlay
-            className={`w-full h-full object-cover ${cameraOn ? 'opacity-100' : 'opacity-0'} transition-opacity`}
+            className={`absolute inset-0 w-full h-full object-cover ${cameraOn ? 'opacity-100' : 'opacity-0'} transition-opacity`}
           />
           {!cameraOn && <PlaceholderDots />}
           {cameraOn && mode === 'card' && <GuideOverlay />}
@@ -223,17 +239,20 @@ export default function Home() {
             )}
           </button>
           <button
-            onClick={cameraOn ? stopCamera : () => nav('/scans')}
-            aria-label="More"
+            onClick={() => {
+              if (cameraOn) stopCamera();
+              else recentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            aria-label={cameraOn ? 'Stop camera' : 'Jump to recent scans'}
             className="w-12 h-12 rounded-2xl border border-hairline bg-card flex items-center justify-center text-ink hover:bg-bg-2 transition"
           >
-            <ArrowIcon />
+            {cameraOn ? <CloseIcon /> : <ArrowIcon />}
           </button>
         </div>
       </section>
 
       {/* Recent scans */}
-      <div className="mt-7 mb-2 flex items-baseline justify-between">
+      <div ref={recentRef} className="mt-7 mb-2 flex items-baseline justify-between">
         <h2 className="text-[13px] text-ink-2 font-medium">Recent Scans</h2>
         <span className="text-[12px] text-ink-3">{currentDateLabel()}</span>
       </div>
@@ -327,6 +346,13 @@ function ArrowIcon() {
   return (
     <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M5 12h14m-5-5 5 5-5 5" />
+    </svg>
+  );
+}
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      <path d="M6 6l12 12M18 6l-12 12" />
     </svg>
   );
 }

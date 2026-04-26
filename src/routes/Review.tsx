@@ -12,16 +12,25 @@ export default function Review() {
 
   useEffect(() => {
     if (!id) return;
-    let url: string | null = null;
+    let cancelled = false;
+    let createdUrl: string | null = null;
     dbx.contacts.get(id).then((r) => {
-      if (!r) return;
+      if (cancelled || !r) return;
       setRow(r);
       if (r.imageBlob) {
-        url = URL.createObjectURL(r.imageBlob);
-        setImageUrl(url);
+        createdUrl = URL.createObjectURL(r.imageBlob);
+        setImageUrl(createdUrl);
       }
     });
-    return () => { if (url) URL.revokeObjectURL(url); };
+    return () => {
+      cancelled = true;
+      // Defer revoke so the <img> can finish loading before the URL dies.
+      // Revoking synchronously in StrictMode kills the image before paint.
+      if (createdUrl) {
+        const u = createdUrl;
+        setTimeout(() => URL.revokeObjectURL(u), 5000);
+      }
+    };
   }, [id]);
 
   if (!row) return <div className="shell pt-6 text-ink-2">Loading…</div>;
@@ -56,7 +65,11 @@ export default function Review() {
       {row.syncStatus === 'needs-extraction' && (
         <div className="card border-warn/40 bg-warn/5 px-4 py-3 mb-4">
           <p className="text-warn text-sm font-medium">Awaiting AI extraction.</p>
-          <p className="text-warn/80 text-xs mt-0.5">Will run automatically when online.</p>
+          {row.syncError ? (
+            <p className="text-warn/90 text-xs mt-1 font-mono break-all">{row.syncError}</p>
+          ) : (
+            <p className="text-warn/80 text-xs mt-0.5">Will run automatically when online.</p>
+          )}
         </div>
       )}
 

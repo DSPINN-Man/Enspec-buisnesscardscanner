@@ -1,0 +1,5 @@
+# SPA fallback — Cloudflare Pages serves index.html for every non-asset path,
+# so React Router can take over /review/:id, /anything-else, etc.
+# Pages Functions (in /functions/api/*) are matched BEFORE this file, so
+# /api/extract and /api/sync still hit the serverless functions.
+/* /index.html 200

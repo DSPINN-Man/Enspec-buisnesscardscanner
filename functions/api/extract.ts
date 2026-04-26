@@ -28,13 +28,19 @@ Return a strict JSON object matching this shape — no prose, no markdown fences
     "name": number, "title": number, "company": number,
     "email": number, "phone": number, "website": number, "notes": number
   },
-  "rawText": string
+  "rawText": string,
+  "boundingBox": { "x": number, "y": number, "width": number, "height": number } | null
 }
 
 Each confidence is 0.0 to 1.0 — your honest belief that the value is correct.
 If a field is not present on the card return null and confidence 0.
 Phone numbers: preserve country code if visible. Website: include scheme if shown, else bare domain.
-Notes: free-form extras (office, social handles). Keep short or null.`;
+Notes: free-form extras (office, social handles). Keep short or null.
+
+boundingBox: locate the rectangular outline of the printed card or badge in the
+image. Return coordinates NORMALISED to the image dimensions (each value 0..1).
+x, y are the top-left corner; width/height are the box size. Be tight — exclude
+hands, shadows, and surrounding surface. If no clear card is visible, return null.`;
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!env.GEMINI_API_KEY) {
