@@ -76,7 +76,11 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      return json({ error: `gemini ${res.status}`, detail: await res.text() }, 502);
+      // Pass the upstream status through so the client can react specifically
+      // to 429 (rate limit) and 401/403 (bad key) — wrapping everything in 502
+      // hides those signals from the queue's backoff logic.
+      const detail = await res.text();
+      return json({ error: `gemini ${res.status}`, detail }, res.status);
     }
 
     const data = await res.json() as any;

@@ -48,9 +48,14 @@ export async function flushPending(): Promise<FlushResult> {
       } catch (err: any) {
         failed++;
         const attempts = row.syncAttempts + 1;
-        const delay = Math.min(60 * 2 ** attempts, 3600) * 1000;
+        // 429 → much longer backoff so we don't hammer Gemini's free tier.
+        // Other errors → standard exponential (60s, 2m, 4m, 8m, …).
+        const isRateLimit = err?.status === 429 || /\b429\b/.test(String(err?.message ?? ''));
+        const baseDelay = isRateLimit ? 5 * 60 : 60;             // seconds
+        const cap       = isRateLimit ? 30 * 60 : 60 * 60;        // seconds
+        const delay = Math.min(baseDelay * 2 ** attempts, cap) * 1000;
         await patchContact(row.id, {
-          syncStatus: 'failed',
+          syncStatus: row.syncStatus === 'needs-extraction' ? 'needs-extraction' : 'failed',
           syncAttempts: attempts,
           syncError: String(err?.message ?? err).slice(0, 500),
           nextAttemptAt: Date.now() + delay,
@@ -67,10 +72,15 @@ async function runExtraction(row: Contact) {
   if (!row.imageBlob) throw new Error('missing image for extraction');
   const result = await extractFromBlob(row.imageBlob);
   await patchContact(row.id, {
+    // Replace the stored photo with the tight crop Gemini outlined for us
+    // so the queue path matches the foreground capture path.
+    imageBlob: result.croppedBlob,
     ...result.fields,
     confidence: result.confidence,
     rawText: result.rawText,
     syncStatus: 'pending',
+    syncError: null,
+    syncAttempts: 0,
   });
 }
 

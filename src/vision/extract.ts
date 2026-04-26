@@ -37,6 +37,16 @@ export async function extractFromBlob(blob: Blob): Promise<ExtractResult> {
 
   const res = await fetch(EXTRACT_ENDPOINT, { method: 'POST', body: form });
   if (!res.ok) {
+    if (res.status === 429) {
+      const e = new Error('Gemini rate limit hit — will retry in a few minutes. (Free tier: 15 req/min, 1500 req/day.)');
+      (e as any).status = 429;
+      throw e;
+    }
+    if (res.status === 401 || res.status === 403) {
+      const e = new Error('Gemini rejected the API key. Check GEMINI_API_KEY in Pages → Variables and Secrets.');
+      (e as any).status = res.status;
+      throw e;
+    }
     const detail = await res.text().catch(() => '');
     throw new Error(`Extract API ${res.status}: ${detail.slice(0, 300) || res.statusText}`);
   }

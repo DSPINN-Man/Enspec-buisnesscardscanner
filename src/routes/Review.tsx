@@ -4,6 +4,27 @@ import { dbx, patchContact, type Contact } from '@/db';
 import { flushPending } from '@/sync/queue';
 import { ConfidenceField } from '@/components/ConfidenceField';
 
+function ErrorHint({ err }: { err: string }) {
+  // Translate the most common Gemini failures into something a human can act on.
+  const isQuota = /\b429\b|quota|rate limit/i.test(err);
+  const isAuth  = /\b40[13]\b|API key|authentication/i.test(err);
+  if (isQuota) {
+    return (
+      <p className="text-warn/90 text-xs mt-1">
+        Hit Gemini's free-tier rate limit (15 requests/minute). The queue will retry automatically in a few minutes.
+      </p>
+    );
+  }
+  if (isAuth) {
+    return (
+      <p className="text-warn/90 text-xs mt-1">
+        Gemini rejected the API key. Check <span className="font-mono">GEMINI_API_KEY</span> in Cloudflare Pages → Settings → Variables and Secrets, then redeploy.
+      </p>
+    );
+  }
+  return <p className="text-warn/90 text-xs mt-1 font-mono break-all">{err}</p>;
+}
+
 export default function Review() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -66,7 +87,7 @@ export default function Review() {
         <div className="card border-warn/40 bg-warn/5 px-4 py-3 mb-4">
           <p className="text-warn text-sm font-medium">Awaiting AI extraction.</p>
           {row.syncError ? (
-            <p className="text-warn/90 text-xs mt-1 font-mono break-all">{row.syncError}</p>
+            <ErrorHint err={row.syncError} />
           ) : (
             <p className="text-warn/80 text-xs mt-0.5">Will run automatically when online.</p>
           )}
