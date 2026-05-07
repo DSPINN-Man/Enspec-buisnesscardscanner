@@ -1,10 +1,11 @@
 // Extraction client. Posts a captured JPEG to /api/extract (Pages Function),
-// which proxies Gemini 2.0 Flash with a structured-output system prompt that
+// which proxies Gemini with a structured-output system prompt that
 // also returns a normalised bounding box of the card. The client uses that
 // bbox to crop the original photo down to just the card before saving — so
 // the review screen and any synced image is tightly cropped.
 
 import { z } from 'zod';
+import { createExtractError, makeExtractError } from './extractErrors';
 
 export const ExtractedSchema = z.object({
   name:    z.string().nullable(),
@@ -30,25 +31,14 @@ export interface ExtractResult {
 const EXTRACT_ENDPOINT = import.meta.env.VITE_EXTRACT_ENDPOINT ?? '/api/extract';
 
 export async function extractFromBlob(blob: Blob): Promise<ExtractResult> {
-  if (!navigator.onLine) throw new Error('offline');
+  if (!navigator.onLine) throw makeExtractError('offline', 'offline', { retryable: true });
 
   const form = new FormData();
   form.append('image', blob, 'card.jpg');
 
   const res = await fetch(EXTRACT_ENDPOINT, { method: 'POST', body: form });
   if (!res.ok) {
-    if (res.status === 429) {
-      const e = new Error('Gemini rate limit hit — will retry in a few minutes. (Free tier: 15 req/min, 1500 req/day.)');
-      (e as any).status = 429;
-      throw e;
-    }
-    if (res.status === 401 || res.status === 403) {
-      const e = new Error('Gemini rejected the API key. Check GEMINI_API_KEY in Pages → Variables and Secrets.');
-      (e as any).status = res.status;
-      throw e;
-    }
-    const detail = await res.text().catch(() => '');
-    throw new Error(`Extract API ${res.status}: ${detail.slice(0, 300) || res.statusText}`);
+    throw await createExtractError(res);
   }
 
   const json = (await res.json()) as {

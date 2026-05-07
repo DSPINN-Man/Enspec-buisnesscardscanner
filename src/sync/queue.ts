@@ -11,6 +11,7 @@
 
 import { dbx, dueForSync, patchContact, type Contact } from '@/db';
 import { extractFromBlob } from '@/vision/extract';
+import { getRetryDelayMs } from './backoff';
 
 const MAX_ATTEMPTS = 6;
 const SYNC_ENDPOINT = import.meta.env.VITE_SYNC_ENDPOINT ?? '/api/sync';
@@ -48,12 +49,10 @@ export async function flushPending(): Promise<FlushResult> {
       } catch (err: any) {
         failed++;
         const attempts = row.syncAttempts + 1;
-        // 429 → much longer backoff so we don't hammer Gemini's free tier.
-        // Other errors → standard exponential (60s, 2m, 4m, 8m, …).
-        const isRateLimit = err?.status === 429 || /\b429\b/.test(String(err?.message ?? ''));
-        const baseDelay = isRateLimit ? 5 * 60 : 60;             // seconds
-        const cap       = isRateLimit ? 30 * 60 : 60 * 60;        // seconds
-        const delay = Math.min(baseDelay * 2 ** attempts, cap) * 1000;
+        const delay = getRetryDelayMs(
+          { status: err?.status, message: String(err?.message ?? err) },
+          attempts,
+        );
         await patchContact(row.id, {
           syncStatus: row.syncStatus === 'needs-extraction' ? 'needs-extraction' : 'failed',
           syncAttempts: attempts,

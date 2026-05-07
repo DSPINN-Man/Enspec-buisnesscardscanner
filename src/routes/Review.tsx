@@ -10,6 +10,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { dbx, deleteContact, patchContact, toggleStar, type Contact } from '@/db';
 import { flushPending } from '@/sync/queue';
 import { ConfidenceField } from '@/components/ConfidenceField';
+import { getReviewErrorHint } from '@/vision/extractErrors';
 
 export default function Review() {
   const { id } = useParams<{ id: string }>();
@@ -159,21 +160,6 @@ function Pulse() {
 }
 
 function ErrorHint({ err }: { err: string }) {
-  const isQuota = /\b429\b|quota|rate limit/i.test(err);
-  const isAuth  = /\b40[13]\b|API key|authentication/i.test(err);
-  if (isQuota) {
-    return (
-      <p className="text-warn/90 text-xs mt-1">
-        Hit Gemini's free-tier rate limit. The queue will retry automatically in a few minutes.
-      </p>
-    );
-  }
-  if (isAuth) {
-    return (
-      <p className="text-warn/90 text-xs mt-1">
-        Gemini rejected the API key. Check <span className="font-mono">GEMINI_API_KEY</span> in Cloudflare Pages → Variables and Secrets, then redeploy.
-      </p>
-    );
-  }
-  return <p className="text-warn/90 text-xs mt-1 font-mono break-all">{err}</p>;
+  const hint = getReviewErrorHint(err);
+  return <p className="text-warn/90 text-xs mt-1">{hint.message}</p>;
 }
