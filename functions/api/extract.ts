@@ -11,9 +11,8 @@ interface Env {
 }
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
-const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
-const LAST_RESORT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
 
 const SYSTEM_PROMPT = `You are a precise business-card / conference-badge extractor.
 Return a strict JSON object matching this shape - no prose, no markdown fences:
@@ -132,7 +131,7 @@ export function getGeminiModelPlans(env: Pick<Env, 'GEMINI_MODEL' | 'GEMINI_FALL
   const candidates = [
     env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
     env.GEMINI_FALLBACK_MODEL || DEFAULT_GEMINI_FALLBACK_MODEL,
-    LAST_RESORT_GEMINI_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
   ];
 
   return Array.from(new Set(candidates.filter(Boolean))).map((model, index) => ({
