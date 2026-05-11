@@ -90,11 +90,15 @@ export async function toggleStar(id: string): Promise<void> {
   await dbx.contacts.update(id, { starred: !row.starred, updatedAt: Date.now() });
 }
 
-export async function dueForSync(now: number, limit = 25): Promise<Contact[]> {
+export function isDueForSync(contact: Pick<Contact, 'nextAttemptAt'>, now: number, force = false): boolean {
+  return force || contact.nextAttemptAt <= now;
+}
+
+export async function dueForSync(now: number, limit = 25, options: { force?: boolean } = {}): Promise<Contact[]> {
   return dbx.contacts
     .where('syncStatus')
     .anyOf('pending', 'needs-extraction', 'failed')
-    .filter((c) => c.nextAttemptAt <= now)
+    .filter((c) => isDueForSync(c, now, options.force))
     .limit(limit)
     .toArray();
 }

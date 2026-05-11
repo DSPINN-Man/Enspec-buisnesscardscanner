@@ -17,10 +17,11 @@ const MAX_ATTEMPTS = 6;
 const SYNC_ENDPOINT = import.meta.env.VITE_SYNC_ENDPOINT ?? '/api/sync';
 
 export interface FlushResult { attempted: number; sent: number; extracted: number; failed: number; }
+export interface FlushOptions { force?: boolean; }
 
 let flushing = false;
 
-export async function flushPending(): Promise<FlushResult> {
+export async function flushPending(options: FlushOptions = {}): Promise<FlushResult> {
   if (flushing) return { attempted: 0, sent: 0, extracted: 0, failed: 0 };
   if (!navigator.onLine) return { attempted: 0, sent: 0, extracted: 0, failed: 0 };
 
@@ -29,11 +30,12 @@ export async function flushPending(): Promise<FlushResult> {
 
   try {
     const now = Date.now();
-    const batch = await dueForSync(now, 25);
+    const batch = await dueForSync(now, 25, options);
     for (const row of batch) {
       if (row.syncAttempts >= MAX_ATTEMPTS) continue;
       try {
         if (row.syncStatus === 'needs-extraction') {
+          if (row.syncError) await patchContact(row.id, { syncError: null, nextAttemptAt: now });
           await runExtraction(row);
           extracted++;
           continue; // let the next flush pass pick it up for delivery

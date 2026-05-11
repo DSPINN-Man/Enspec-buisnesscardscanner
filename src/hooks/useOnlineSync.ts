@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { pendingCount } from '@/db';
-import { flushPending, getLastSyncedAt } from '@/sync/queue';
+import { flushPending, getLastSyncedAt, type FlushOptions } from '@/sync/queue';
 
 // The main liveness hook. Aggregates:
 //   • navigator.onLine (driven by 'online' / 'offline' events)
@@ -23,34 +23,36 @@ export function useOnlineSync() {
     setLastSyncAt(await getLastSyncedAt());
   }, []);
 
-  const syncNow = useCallback(async () => {
+  const runFlush = useCallback(async (options: FlushOptions = {}) => {
     if (syncing) return;
     setSyncing(true);
     try {
-      await flushPending();
+      await flushPending(options);
       await refreshLast();
     } finally {
       setSyncing(false);
     }
   }, [syncing, refreshLast]);
 
+  const syncNow = useCallback(() => runFlush({ force: true }), [runFlush]);
+
   useEffect(() => {
     refreshLast();
 
-    const onOnline  = () => { setOnline(true);  syncNow(); };
+    const onOnline  = () => { setOnline(true);  runFlush(); };
     const onOffline = () => setOnline(false);
-    const onVisible = () => { if (document.visibilityState === 'visible') syncNow(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') runFlush(); };
 
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     document.addEventListener('visibilitychange', onVisible);
 
     // Opportunistic mount flush.
-    syncNow();
+    runFlush();
 
     // Heartbeat while tab is open — retries failed rows whose backoff expired.
     heartbeat.current = window.setInterval(() => {
-      if (navigator.onLine) syncNow();
+      if (navigator.onLine) runFlush();
     }, 60_000);
 
     return () => {

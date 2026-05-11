@@ -118,7 +118,7 @@ export default function Review() {
 
       <div className="mt-3 space-y-2">
         <button
-          onClick={async () => { await flushPending(); nav('/'); }}
+          onClick={async () => { await flushPending({ force: true }); nav('/'); }}
           disabled={isExtracting && !hasFields}
           className="w-full py-3.5 rounded-full bg-accent text-white font-semibold shadow-cta active:scale-[0.99] transition disabled:opacity-50"
         >
