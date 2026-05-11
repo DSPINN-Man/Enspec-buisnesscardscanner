@@ -11,7 +11,7 @@ interface Env {
 }
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
 const LAST_RESORT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
@@ -151,7 +151,11 @@ function isRetryableGeminiFailure(failure: GeminiFailure): boolean {
 
   if (status === 500 || status === 502 || status === 503 || status === 504) return true;
 
-  return (status === 400 || status === 404) && /model|not found|unsupported|unavailable|deprecated/i.test(detail);
+  if ((status === 400 || status === 404) && /model|not found|unsupported|unavailable|deprecated/i.test(detail)) {
+    return true;
+  }
+
+  return status === 403 && /model|not available|not enabled|permission denied.*model|access.*model/i.test(detail);
 }
 
 function toGeminiFailure(status: number, model: string, detail: string): GeminiFailure {
