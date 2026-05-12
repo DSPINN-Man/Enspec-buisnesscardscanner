@@ -150,19 +150,27 @@ function isRetryableGeminiFailure(failure: GeminiFailure): boolean {
   const status = failure.status;
   const detail = String(failure.body.detail ?? failure.body.message ?? failure.body.error ?? '');
 
+  return shouldTryNextGeminiModel(status, detail);
+}
+
+export function shouldTryNextGeminiModel(status: number, detail: string): boolean {
   if (status === 500 || status === 502 || status === 503 || status === 504) return true;
 
   if ((status === 400 || status === 404) && /model|not found|unsupported|unavailable|deprecated/i.test(detail)) {
     return true;
   }
 
-  return status === 403 && /model|not available|not enabled|permission denied.*model|access.*model/i.test(detail);
+  if (status !== 403) return false;
+  if (/api key not valid|invalid api key|reported as leaked|expired api key/i.test(detail)) return false;
+
+  return /project has been denied access|permission_denied|model|not available|not enabled|access/i.test(detail);
 }
 
 function toGeminiFailure(status: number, model: string, detail: string): GeminiFailure {
   const isBusy = status === 500 || status === 502 || status === 503 || status === 504;
   const isQuota = status === 429;
   const isAuth = status === 401 || status === 403;
+  const upstreamMessage = getUpstreamMessage(detail);
 
   return {
     ok: false,
@@ -174,7 +182,9 @@ function toGeminiFailure(status: number, model: string, detail: string): GeminiF
         : isQuota
           ? 'Gemini rate limit hit. Your card was saved and will retry automatically in a few minutes.'
           : isAuth
-            ? 'Gemini rejected the API key. Check GEMINI_API_KEY in Cloudflare Pages Variables and Secrets.'
+            ? upstreamMessage
+              ? `Gemini access denied: ${upstreamMessage}`
+              : 'Gemini rejected the API key. Check GEMINI_API_KEY in Cloudflare Pages Variables and Secrets.'
             : 'Gemini extraction failed. Your card was saved and will retry automatically.',
       retryable: !isAuth,
       upstreamStatus: status,
@@ -182,6 +192,15 @@ function toGeminiFailure(status: number, model: string, detail: string): GeminiF
       detail: detail.slice(0, 500),
     },
   };
+}
+
+function getUpstreamMessage(detail: string): string | null {
+  try {
+    const parsed = JSON.parse(detail) as { error?: { message?: unknown } };
+    return typeof parsed.error?.message === 'string' ? parsed.error.message : null;
+  } catch {
+    return null;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

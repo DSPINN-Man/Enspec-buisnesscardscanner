@@ -30,6 +30,14 @@ describe('createExtractError', () => {
 });
 
 describe('getReviewErrorHint', () => {
+  it('surfaces project access denial instead of blaming a missing key', () => {
+    const hint = getReviewErrorHint('Gemini access denied: Your project has been denied access. Please contact support.');
+
+    expect(hint.kind).toBe('auth');
+    expect(hint.message).toContain('project has been denied access');
+    expect(hint.message).not.toContain('GEMINI_API_KEY');
+  });
+
   it('does not expose raw JSON for Gemini high-demand failures', () => {
     const hint = getReviewErrorHint('Extract API 503: {"error":"gemini 503","detail":"This model is currently experiencing high demand","status":"UNAVAILABLE"}');
 

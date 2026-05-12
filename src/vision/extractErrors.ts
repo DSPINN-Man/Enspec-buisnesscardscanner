@@ -57,6 +57,13 @@ export async function createExtractError(response: Response): Promise<ExtractErr
 }
 
 export function getReviewErrorHint(errorText: string): ReviewErrorHint {
+  if (/project has been denied access/i.test(errorText)) {
+    return {
+      kind: 'auth',
+      message: 'Gemini project has been denied access. Create a new Google AI Studio API key/project or contact Google support, then replace the Cloudflare secret.',
+    };
+  }
+
   if (/\b429\b|quota|rate limit|RESOURCE_EXHAUSTED/i.test(errorText)) {
     return {
       kind: 'quota',
