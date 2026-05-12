@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { getGeminiModelPlans } from './extract';
 
 describe('getGeminiModelPlans', () => {
-  it('uses current stable Gemini models from the official model list', () => {
+  it('uses Gemini 3.1 Flash-Lite before 2.5 stable fallbacks', () => {
     expect(getGeminiModelPlans({}).map((plan) => plan.model)).toEqual([
+      'gemini-3.1-flash-lite',
       'gemini-2.5-flash',
       'gemini-2.5-flash-lite',
     ]);
