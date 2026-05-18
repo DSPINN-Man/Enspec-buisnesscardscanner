@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { dbx, deleteContact, toggleStar, type Contact } from '@/db';
 import { SwipeableScanRow } from '@/components/SwipeableScanRow';
+import { exportContactsCsv, exportContactsJsonBackup } from '@/export/contacts';
 
 type Filter = 'all' | 'starred' | 'pending' | 'today';
 
@@ -14,6 +15,8 @@ export default function Scans() {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<'csv' | 'json' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const all = useLiveQuery(
     () => dbx.contacts.orderBy('createdAt').reverse().toArray(),
@@ -59,6 +62,20 @@ export default function Scans() {
   }, [all]);
 
   const groups = useMemo(() => groupByDay(filtered), [filtered]);
+  const hasScans = (all?.length ?? 0) > 0;
+
+  const handleExport = async (type: 'csv' | 'json') => {
+    setExportError(null);
+    setExporting(type);
+    try {
+      if (type === 'csv') await exportContactsCsv();
+      else await exportContactsJsonBackup();
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') setExportError('Export failed. Please try again.');
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <div className="shell pt-2 pb-32">
@@ -78,6 +95,22 @@ export default function Scans() {
         <Stat label="Pending"  value={counts.pending} />
         <Stat label="Today"    value={counts.today} />
       </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <ExportButton
+          label={exporting === 'csv' ? 'Exporting' : 'Export CSV'}
+          disabled={!hasScans || exporting !== null}
+          onClick={() => handleExport('csv')}
+          icon="csv"
+        />
+        <ExportButton
+          label={exporting === 'json' ? 'Exporting' : 'JSON Backup'}
+          disabled={!hasScans || exporting !== null}
+          onClick={() => handleExport('json')}
+          icon="json"
+        />
+      </div>
+      {exportError && <p className="text-[12px] text-warn mb-3 px-1">{exportError}</p>}
 
       {/* Search */}
       <div className="mb-3 relative">
@@ -149,6 +182,50 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
       <div className={`text-[20px] font-bold leading-none ${accent ? 'text-accent' : 'text-ink'}`}>{value}</div>
       <div className="text-[10px] uppercase tracking-wider text-ink-3 font-semibold mt-1">{label}</div>
     </div>
+  );
+}
+
+function ExportButton({
+  label,
+  disabled,
+  onClick,
+  icon,
+}: {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+  icon: 'csv' | 'json';
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="h-11 rounded-2xl border border-hairline bg-card px-3 flex items-center justify-center gap-2 text-[13px] font-semibold text-ink-2 hover:text-ink hover:bg-bg-2 transition disabled:opacity-40 disabled:hover:bg-card disabled:hover:text-ink-2"
+    >
+      {icon === 'csv' ? <CsvIcon /> : <JsonIcon />}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function CsvIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 3h7l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+      <path d="M14 3v5h5" />
+      <path d="M8 14h8" />
+      <path d="M8 17h5" />
+    </svg>
+  );
+}
+
+function JsonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h2" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-2" />
+      <path d="M10 12h4" />
+    </svg>
   );
 }
 
