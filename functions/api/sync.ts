@@ -1,36 +1,68 @@
 // Cloudflare Pages Function — POST /api/sync
-//
-// Forwards a contact JSON to your email/CRM webhook (SendGrid, Postmark,
-// Make.com, n8n, etc). If EMAIL_WEBHOOK_URL is unset we just acknowledge
-// — useful while you're still wiring up delivery.
+// Creates or updates an All Energy 2026 mailing contact through Odoo's JSON-RPC API.
+// Odoo credentials stay in encrypted Cloudflare environment secrets.
 
-interface Env {
-  EMAIL_WEBHOOK_URL?: string;
+import {
+  OdooSyncError,
+  parseScannerPayload,
+  syncMailingContactToOdoo,
+  type OdooEnv,
+} from '../lib/odoo';
+
+interface Env extends OdooEnv {
+  SCANNER_ALLOWED_ORIGIN?: string;
 }
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  try {
-    const payload = await request.json();
-    const idempotency = request.headers.get('Idempotency-Key') ?? '';
+const MAX_BODY_BYTES = 32 * 1024;
 
-    if (!env.EMAIL_WEBHOOK_URL) {
-      return json({ ok: true, delivered: false, reason: 'EMAIL_WEBHOOK_URL not set' });
+export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (contentLength > MAX_BODY_BYTES) {
+    return json({ error: 'payload_too_large', message: 'The contact payload is too large.' }, 413);
+  }
+
+  if (!request.headers.get('Content-Type')?.toLowerCase().includes('application/json')) {
+    return json({ error: 'unsupported_media_type', message: 'Expected application/json.' }, 415);
+  }
+
+  if (!isAllowedOrigin(request, env.SCANNER_ALLOWED_ORIGIN)) {
+    return json({ error: 'origin_not_allowed', message: 'This scanner origin is not allowed.' }, 403);
+  }
+
+  try {
+    const payload = parseScannerPayload(await request.json());
+    const headerId = request.headers.get('Idempotency-Key');
+    if (!headerId || headerId !== payload.id) {
+      return json({ error: 'invalid_idempotency_key', message: 'The scan identifier is missing or invalid.' }, 400);
     }
 
-    const res = await fetch(env.EMAIL_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotency,
-      },
-      body: JSON.stringify(payload),
+    const result = await syncMailingContactToOdoo(payload, env);
+    return json({
+      ok: true,
+      delivered: true,
+      odooContactId: result.odooContactId,
+      operation: result.operation,
     });
-    if (!res.ok) return json({ error: `webhook ${res.status}`, detail: await res.text() }, 502);
-    return json({ ok: true, delivered: true });
-  } catch (err: any) {
-    return json({ error: String(err?.message ?? err) }, 500);
+  } catch (err: unknown) {
+    if (err instanceof TypeError) {
+      return json({ error: 'invalid_payload', message: err.message }, 400);
+    }
+    if (err instanceof OdooSyncError) {
+      return json({
+        error: `odoo_${err.code}`,
+        message: err.message,
+        retryable: err.code !== 'not_configured' && err.code !== 'authentication',
+      }, err.status);
+    }
+    return json({ error: 'sync_failed', message: 'Odoo sync failed unexpectedly.', retryable: true }, 500);
   }
 };
+
+function isAllowedOrigin(request: Request, configuredOrigin?: string): boolean {
+  if (!configuredOrigin) return true;
+  const origin = request.headers.get('Origin');
+  return origin === configuredOrigin.replace(/\/$/, '');
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {

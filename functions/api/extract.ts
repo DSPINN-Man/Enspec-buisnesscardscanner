@@ -8,12 +8,16 @@ interface Env {
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
   GEMINI_FALLBACK_MODEL?: string;
+  SCANNER_ALLOWED_ORIGIN?: string;
 }
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
 const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
 const LAST_RESORT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const SYSTEM_PROMPT = `You are a precise business-card / conference-badge extractor.
 Return a strict JSON object matching this shape - no prose, no markdown fences:
@@ -47,6 +51,13 @@ x, y are the top-left corner; width/height are the box size. Be tight - exclude
 hands, shadows, and surrounding surface. If no clear card is visible, return null.`;
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return json({ error: 'image_too_large', message: 'The image must be 8 MB or smaller.' }, 413);
+  }
+  if (env.SCANNER_ALLOWED_ORIGIN && request.headers.get('Origin') !== env.SCANNER_ALLOWED_ORIGIN.replace(/\/$/, '')) {
+    return json({ error: 'origin_not_allowed', message: 'This scanner origin is not allowed.' }, 403);
+  }
   if (!env.GEMINI_API_KEY) {
     return json({ error: 'GEMINI_API_KEY not configured in Pages env vars' }, 500);
   }
@@ -55,6 +66,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const form = await request.formData();
     const file = form.get('image');
     if (!(file instanceof File)) return json({ error: 'missing image' }, 400);
+    if (file.size > MAX_IMAGE_BYTES) {
+      return json({ error: 'image_too_large', message: 'The image must be 8 MB or smaller.' }, 413);
+    }
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      return json({ error: 'unsupported_image', message: 'Use a JPG, PNG or WebP image.' }, 415);
+    }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const base64 = bytesToBase64(bytes);

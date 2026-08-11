@@ -1,125 +1,121 @@
-# ENSPEC Card Scanner — PWA
+# ENSPEC All Energy 2026 Scanner
 
-Offline-first business card & conference-badge scanner. React + Vite + TypeScript, deploys as a single Cloudflare Pages site (frontend + serverless API in one project). Installs to the iPhone home screen via Add-to-Home-Screen — no App Store, no Apple Developer account.
+Offline-first business-card and conference-badge scanner for **All Energy 2026**.
+It is a React, Vite and TypeScript PWA deployed with Cloudflare Pages. Staff can
+capture cards during unreliable event Wi-Fi, review the extracted details, and
+automatically save them to the same Odoo Mailing Contacts area used by Nathan's
+existing `/allenergy` form.
 
 ## Architecture
 
-```
-Browser (iPhone PWA)                Cloudflare Pages                       Google
-┌────────────────────────────┐      ┌──────────────────────────┐           ┌────────────┐
-│  Vite + React + Tailwind   │      │  Static dist/            │           │            │
-│  Service worker (Workbox)  │─────▶│  + Pages Functions:      │──────────▶│ Gemini 2.0 │
-│  Dexie (IndexedDB)         │      │    /api/extract          │           │  Flash     │
-│  MediaDevices camera       │      │    /api/sync             │           └────────────┘
-│  BarcodeDetector (badge)   │      │  Secrets in dashboard    │──────────▶ Email webhook
-└────────────────────────────┘      └──────────────────────────┘           (SendGrid / etc.)
+```text
+iPhone PWA
+  |-- camera / badge scanner
+  |-- IndexedDB offline queue
+  |-- POST /api/extract -- Cloudflare Function -- Gemini
+  `-- POST /api/sync ---- Cloudflare Function -- Odoo mailing.contact
 ```
 
-Single deployment. Same domain. No CORS. Secrets live in the Pages dashboard.
+Odoo and Gemini secrets live only in encrypted Cloudflare Pages settings. They
+are never sent to the browser or stored in an Odoo Website Page.
 
-## Local dev
+## Local development
 
 ```bash
 npm install
-npm run dev                     # http://localhost:5173
+npm run dev
+npm test
+npm run build
 ```
 
-For local end-to-end (camera + Pages Functions together) use Wrangler's Pages dev:
+Camera access and the service worker require HTTPS outside localhost. Use
+Wrangler Pages development for local end-to-end work involving Pages Functions.
 
-```bash
-npx wrangler pages dev -- npm run dev
-```
+## Cloudflare configuration
 
-The camera + service worker require **HTTPS**. For iPhone testing on your LAN, build then preview:
+Build settings:
 
-```bash
-npm run build && npm run preview -- --host
-```
+- Framework preset: None
+- Build command: `npm run build`
+- Build output directory: `dist`
+- Root directory: empty
 
-## Deploy (Cloudflare Pages)
+Encrypted variables and secrets:
 
-### One-time
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL` and `GEMINI_FALLBACK_MODEL` (optional)
+- `ODOO_URL` - `https://enspec.odoo.com`
+- `ODOO_DATABASE` - ENSPEC's Odoo database name
+- `ODOO_USERNAME` - dedicated least-privilege scanner integration user
+- `ODOO_API_KEY` - API key generated for that user
+- `ODOO_MAILING_LIST_ID` - `5` for **All Energy 2026**
+- `ODOO_EVENT_NAME` - optional; defaults to `All Energy 2026`
+- `SCANNER_ALLOWED_ORIGIN` - final scanner origin, such as `https://cards.enspec.com`
 
-1. Push this repo to GitHub (already done).
-2. Cloudflare → **Workers & Pages → Create → Pages → Connect to Git** → pick this repo.
-3. Build settings:
-   - **Framework preset:** None
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-   - **Root directory:** *(leave empty)*
-4. **Settings → Variables and Secrets:** add (encrypted)
-   - `GEMINI_API_KEY`  ← from https://aistudio.google.com/app/apikey
-   - `EMAIL_WEBHOOK_URL`  ← optional (SendGrid / Postmark / Make.com webhook URL)
+Protect the production Pages application with Cloudflare Access for ENSPEC staff.
 
-### Every push
+## Odoo destination
 
-`git push` → Pages auto-deploys. Service worker auto-updates; team gets the new version on next launch.
+The existing website page at `/allenergy` remains Nathan's form and is not
+created, edited or published by this project. The scanner writes server-side to:
 
-### Custom domain
+- model: `mailing.contact`
+- mailing list: **All Energy 2026** (id `5`)
+- integration account: a dedicated user limited to the permissions required to
+  search, create and update mailing contacts
 
-Pages → **Custom domains → Set up a custom domain** → `cards.enspec.com` (or whatever). Cloudflare provisions the TLS cert; team uses the friendly URL.
+The UTM campaign and unpublished `/all-energy-2026` shell created during the
+earlier CRM prototype are not used by this integration and are left untouched.
 
-## Team install (60 seconds each)
+## Odoo delivery
 
-> Open **https://cards.enspec.com** in Safari on your iPhone.
-> Tap the Share icon → **Add to Home Screen** → Add.
-> Open it from the home screen, grant camera permission, scan.
+`POST /api/sync` validates the contact and requires its `Idempotency-Key` header
+to match the local scan id. The server authenticates using encrypted Cloudflare
+secrets, searches `mailing.contact` for a durable scanner marker, and then:
 
-## Offline behaviour (iOS Safari)
+- creates a contact when that scan has never been delivered;
+- updates the same contact after a retry or edit;
+- assigns the contact to the All Energy 2026 mailing list;
+- returns the confirmed Odoo contact id to the PWA;
+- never marks a local scan as synced unless Odoo confirms the operation.
 
-| Action                              | Offline | Online |
-|-------------------------------------|---------|--------|
-| Open app                            | ✅ cached shell | ✅ |
-| Capture card photo                  | ✅      | ✅     |
-| AI extraction                       | ❌ queued (`needs-extraction`) | ✅ |
-| Sync to email webhook               | ❌ queued (`pending`) | ✅ |
-| Background sync while app is closed | ❌ (iOS doesn't allow) | — |
+Field mapping:
 
-On reconnect or app re-open, the queue flushes automatically. Manual "Sync now" is always available in the status strip.
+| Scanner | Odoo `mailing.contact` |
+| --- | --- |
+| Name | `name` |
+| Job title | `x_studio_job_title` |
+| Company | `company_name` |
+| Email | `email` |
+| Phone | `mobile` |
+| Notes, website, capture metadata and scanner marker | `x_studio_notes` |
+| All Energy 2026 mailing-list membership | `list_ids` |
 
-### iOS storage durability
+The first release does not attach the card image to Odoo. The image remains in
+the device's local backup/export so sync payloads stay small and reliable.
 
-On first use the app calls `navigator.storage.persist()`. Safari grants this after a few interactions. Without it, iOS can evict IndexedDB after ~2 weeks of non-use. The status strip shows a ⚠ when persistence hasn't been granted yet.
+## Offline behaviour
 
-## Project layout
+| Action | Offline | Online |
+| --- | --- | --- |
+| Open cached application | Yes | Yes |
+| Capture and save card locally | Yes | Yes |
+| Gemini extraction | Queued | Yes |
+| Odoo delivery | Queued | Yes |
 
-```
-web-scanner/
-├─ src/                       Frontend
-│  ├─ main.tsx                Router bootstrap
-│  ├─ App.tsx                 Status strip (online / pending / last synced / sync now)
-│  ├─ routes/
-│  │  ├─ Home.tsx             Scans list + Scan FAB
-│  │  ├─ Scan.tsx             getUserMedia + guide frame + capture + BarcodeDetector
-│  │  └─ Review.tsx           Confidence-heatmap edit form
-│  ├─ components/             ConfidenceField, ModeToggle
-│  ├─ db/index.ts             Dexie schema + CRUD
-│  ├─ vision/extract.ts       Calls /api/extract
-│  ├─ sync/queue.ts           Flush logic, exponential backoff
-│  └─ hooks/                  useOnlineSync, usePersistentStorage
-├─ functions/api/             Pages Functions (serverless)
-│  ├─ extract.ts              POST /api/extract → Gemini 2.0 Flash
-│  └─ sync.ts                 POST /api/sync → forwards to EMAIL_WEBHOOK_URL
-├─ public/
-│  └─ favicon.svg             (generate icon-192.png / icon-512.png before prod deploy)
-├─ vite.config.ts             vite-plugin-pwa — manifest + Workbox
-├─ tailwind.config.ts         Theme tokens (evolution of source repo palette)
-└─ README.md
-```
+iOS does not provide reliable closed-app background sync. Pending work flushes
+when the app opens, returns to the foreground, receives an online event, or when
+staff press **Sync now**.
 
-## Before going live — checklist
+## Controlled release checklist
 
-- [ ] In Pages dashboard: add `GEMINI_API_KEY` (encrypted) — required
-- [ ] In Pages dashboard: add `EMAIL_WEBHOOK_URL` (encrypted) — optional, omit to test extraction without delivery
-- [ ] Generate PWA icons (`icon-192.png`, `icon-512.png`, `icon-512-maskable.png`) into `public/` (e.g. realfavicongenerator.net)
-- [ ] Trigger a redeploy after adding secrets (Pages → Deployments → Retry deployment)
-- [ ] Custom domain set up (optional but nicer)
-- [ ] Install on your own iPhone and do a full scan → offline → reconnect → sync cycle before sharing the URL
-
-## Roadmap (independent next steps)
-
-1. **Rectangle detection** via OpenCV.js or a TFJS segmentation model — replace manual shutter with auto-capture when the card is flat & in focus
-2. **Image upload leg** in the sync pipeline so the original card photo ends up in the email alongside the JSON
-3. **Duplicate detection** — hash (name, email) and flag dupes on the Home list
-4. **Conflict resolution** — edit-after-sync → PATCH to the sync endpoint with `updated_at`
-5. **Capacitor wrap** if you ever get an Apple Developer account: `npx cap add ios` → real background sync, haptics, no Safari eviction. Same codebase.
+- [x] Match Nathan's `/allenergy` form model and fields
+- [x] Resolve the All Energy 2026 mailing list id (`5`)
+- [ ] Create a dedicated Odoo integration user and API key
+- [ ] Configure encrypted Cloudflare secrets
+- [ ] Protect the deployment with Cloudflare Access
+- [ ] Deploy a non-production preview
+- [ ] Verify one approved test contact and edit/retry without duplication
+- [ ] Remove the test contact only if an authorised Odoo owner asks for it
+- [ ] Test capture, offline storage and reconnection on one iPhone
+- [ ] Promote the approved preview to production

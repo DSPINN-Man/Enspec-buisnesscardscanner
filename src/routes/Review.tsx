@@ -100,6 +100,21 @@ export default function Review() {
         </div>
       )}
 
+      {row.syncStatus === 'synced' && row.odooContactId && (
+        <a
+          href={`${import.meta.env.VITE_ODOO_URL || 'https://enspec.odoo.com'}/web#id=${row.odooContactId}&model=mailing.contact&view_type=form`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="card border-ok/30 bg-ok/5 px-4 py-3 mb-4 flex items-center justify-between gap-3"
+        >
+          <span>
+            <span className="block text-ok text-sm font-semibold">Saved in Odoo</span>
+            <span className="block text-ink-2 text-xs mt-0.5">Mailing contact #{row.odooContactId}</span>
+          </span>
+          <span className="text-ok text-sm font-semibold">Open →</span>
+        </a>
+      )}
+
       <div className="card p-4 relative">
         {isExtracting && !hasFields ? (
           <SkeletonForm />

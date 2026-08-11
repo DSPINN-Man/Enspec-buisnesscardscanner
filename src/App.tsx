@@ -23,21 +23,18 @@ export default function App() {
 function Header() {
   return (
     <div className="shell pt-3 pb-2 flex items-center justify-between" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 12px)' }}>
-      <button
-        aria-label="Brand"
-        className="w-10 h-10 rounded-full bg-card border border-hairline flex items-center justify-center text-ink font-bold text-[12px] tracking-tight"
-      >
-        SC°
-      </button>
-      <button
-        aria-label="Profile"
-        className="w-10 h-10 rounded-full bg-bg-2 border border-hairline flex items-center justify-center text-ink-2"
-      >
-        <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8}>
-          <circle cx="12" cy="9" r="3.5" />
-          <path d="M5 19c1.5-3.5 4-5 7-5s5.5 1.5 7 5" strokeLinecap="round" />
-        </svg>
-      </button>
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-10 h-10 rounded-xl bg-ink text-white flex items-center justify-center font-display font-extrabold text-[11px] tracking-tight shrink-0">
+          ENS
+        </div>
+        <div className="min-w-0">
+          <p className="font-display font-extrabold tracking-tight text-[16px] leading-tight">ENSPEC</p>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-ink-3 truncate">All Energy 2026</p>
+        </div>
+      </div>
+      <span className="rounded-full border border-accent/20 bg-accent-soft px-3 py-1.5 text-[11px] font-semibold text-accent">
+        Odoo sync
+      </span>
     </div>
   );
 }

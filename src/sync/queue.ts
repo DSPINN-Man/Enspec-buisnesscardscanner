@@ -12,6 +12,7 @@
 import { dbx, dueForSync, patchContact, type Contact } from '@/db';
 import { extractFromBlob } from '@/vision/extract';
 import { getRetryDelayMs } from './backoff';
+import { z } from 'zod';
 
 const MAX_ATTEMPTS = 6;
 const SYNC_ENDPOINT = import.meta.env.VITE_SYNC_ENDPOINT ?? '/api/sync';
@@ -41,11 +42,12 @@ export async function flushPending(options: FlushOptions = {}): Promise<FlushRes
           continue; // let the next flush pass pick it up for delivery
         }
         await patchContact(row.id, { syncStatus: 'syncing' });
-        await deliver(row);
+        const delivery = await deliver(row);
         await patchContact(row.id, {
           syncStatus: 'synced',
           syncError: null,
           syncAttempts: 0,
+          odooContactId: delivery.odooContactId,
         });
         sent++;
       } catch (err: any) {
@@ -85,7 +87,14 @@ async function runExtraction(row: Contact) {
   });
 }
 
-async function deliver(row: Contact) {
+const DeliverySchema = z.object({
+  ok: z.literal(true),
+  delivered: z.literal(true),
+  odooContactId: z.number().int().positive(),
+  operation: z.enum(['created', 'updated']),
+});
+
+async function deliver(row: Contact): Promise<z.infer<typeof DeliverySchema>> {
   const res = await fetch(SYNC_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -105,7 +114,14 @@ async function deliver(row: Contact) {
       captured_at: row.createdAt,
     }),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: unknown } | null;
+    const message = typeof body?.message === 'string' ? body.message : `Odoo sync HTTP ${res.status}`;
+    const error = new Error(message) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
+  }
+  return DeliverySchema.parse(await res.json());
 }
 
 export async function getLastSyncedAt(): Promise<number | null> {

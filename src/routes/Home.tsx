@@ -192,9 +192,9 @@ export default function Home() {
 
       {/* Scanner card */}
       <section className="card p-5">
-        <p className="text-[12px] text-ink-2 mb-1.5">{cameraOn ? 'Live preview' : 'Ready to scan'}</p>
+        <p className="text-[12px] text-ink-2 mb-1.5">{cameraOn ? 'Live preview' : 'All Energy 2026 · Ready'}</p>
         <h1 className="font-display font-extrabold text-[40px] leading-[1.05] tracking-tight mb-4">
-          {mode === 'card' ? 'Point Camera' : 'Scan Badge'}
+          {mode === 'card' ? 'Scan a card' : 'Scan a badge'}
         </h1>
 
         <button

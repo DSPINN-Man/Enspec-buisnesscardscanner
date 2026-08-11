@@ -16,6 +16,7 @@ function contact(overrides: Partial<Contact> = {}): Contact {
     imageBlob: null,
     confidence: { name: 0.98 },
     rawText: 'Ada Lovelace',
+    odooContactId: null,
     syncStatus: 'pending',
     syncAttempts: 2,
     syncError: null,

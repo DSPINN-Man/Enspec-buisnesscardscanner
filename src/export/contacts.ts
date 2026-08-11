@@ -8,6 +8,7 @@ const CSV_COLUMNS: Array<{ header: string; value: (contact: Contact) => unknown 
   { header: 'starred', value: (c) => c.starred },
   { header: 'sync_status', value: (c) => c.syncStatus },
   { header: 'sync_attempts', value: (c) => c.syncAttempts },
+  { header: 'odoo_contact_id', value: (c) => c.odooContactId },
   { header: 'name', value: (c) => c.name },
   { header: 'title', value: (c) => c.title },
   { header: 'company', value: (c) => c.company },

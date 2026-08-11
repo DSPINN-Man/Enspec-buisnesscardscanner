@@ -30,9 +30,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'ENSPEC Card Scanner',
-        short_name: 'Cards',
-        description: 'Offline-first business card & conference badge scanner.',
+        name: 'ENSPEC All Energy 2026 Scanner',
+        short_name: 'All Energy 26',
+        description: 'ENSPEC offline-first business card and conference badge scanner for All Energy 2026.',
         theme_color: '#EFEAE3',
         background_color: '#EFEAE3',
         display: 'standalone',

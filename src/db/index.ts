@@ -16,6 +16,7 @@ export interface Contact {
   imageBlob: Blob | null;
   confidence: Record<string, number> | null;
   rawText: string | null;
+  odooContactId: number | null;
   syncStatus: SyncStatus;
   syncAttempts: number;
   syncError: string | null;
@@ -38,6 +39,21 @@ class ScannerDB extends Dexie {
       contacts: 'id, syncStatus, createdAt, nextAttemptAt, starred',
     }).upgrade((tx) =>
       tx.table('contacts').toCollection().modify((c) => { c.starred = false; }),
+    );
+    // v3 — remember the confirmed Odoo CRM record created for each scan.
+    this.version(3).stores({
+      contacts: 'id, syncStatus, createdAt, nextAttemptAt, starred',
+    }).upgrade((tx) =>
+      tx.table('contacts').toCollection().modify((c) => { c.odooContactId = null; }),
+    );
+    // v4 migrates local data created during the earlier CRM-lead prototype.
+    this.version(4).stores({
+      contacts: 'id, syncStatus, createdAt, nextAttemptAt, starred',
+    }).upgrade((tx) =>
+      tx.table('contacts').toCollection().modify((c) => {
+        c.odooContactId = c.odooContactId ?? c.odooLeadId ?? null;
+        delete c.odooLeadId;
+      }),
     );
   }
 }
@@ -64,6 +80,7 @@ export async function insertContact(
     imageBlob: input.imageBlob ?? null,
     confidence: input.confidence ?? null,
     rawText: input.rawText ?? null,
+    odooContactId: input.odooContactId ?? null,
     syncStatus: input.syncStatus ?? 'pending',
     syncAttempts: 0,
     syncError: null,
