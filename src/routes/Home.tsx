@@ -17,6 +17,9 @@ import { extractFromBlob } from '@/vision/extract';
 import { flushPending } from '@/sync/queue';
 import { ModeToggle, type Mode } from '@/components/ModeToggle';
 import { SwipeableScanRow } from '@/components/SwipeableScanRow';
+import { getCoverCaptureCrop } from '@/camera/captureCrop';
+
+const CAMERA_GUIDE_INSET_PX = 12;
 
 export default function Home() {
   const nav = useNavigate();
@@ -114,19 +117,38 @@ export default function Home() {
       const vw = v.videoWidth, vh = v.videoHeight;
       if (!vw || !vh) throw new Error('Camera not ready — give it a moment.');
 
-      // Capture FULL frame so Gemini can see the card boundaries.
+      // The preview uses `object-cover`, so the native camera frame extends
+      // beyond what the user can see. Map the visible guide back into native
+      // camera pixels so Review shows exactly what was framed.
+      const crop = getCoverCaptureCrop({
+        sourceWidth: vw,
+        sourceHeight: vh,
+        viewportWidth: v.clientWidth,
+        viewportHeight: v.clientHeight,
+        inset: CAMERA_GUIDE_INSET_PX,
+      });
       const c = canvasRef.current;
-      c.width = vw;
-      c.height = vh;
-      c.getContext('2d')!.drawImage(v, 0, 0, vw, vh);
-      const fullBlob = await new Promise<Blob>((res, rej) =>
+      c.width = Math.round(crop.width);
+      c.height = Math.round(crop.height);
+      c.getContext('2d')!.drawImage(
+        v,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        c.width,
+        c.height,
+      );
+      const framedBlob = await new Promise<Blob>((res, rej) =>
         c.toBlob((b) => (b ? res(b) : rej(new Error('blob failed'))), 'image/jpeg', 0.92),
       );
 
       // Persist photo first, navigate IMMEDIATELY — extraction runs in BG.
       const row = await insertContact({
         mode: 'card',
-        imageBlob: fullBlob,
+        imageBlob: framedBlob,
         syncStatus: 'needs-extraction',
       });
       nav(`/review/${row.id}`);
@@ -134,7 +156,7 @@ export default function Home() {
       // Fire-and-forget — Review screen renders the image instantly and
       // the form fields populate reactively as soon as we patch the row.
       if (navigator.onLine) {
-        extractFromBlob(fullBlob)
+        extractFromBlob(framedBlob)
           .then(async (r) => {
             await patchContact(row.id, {
               imageBlob: r.croppedBlob,
